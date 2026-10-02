@@ -8,5 +8,6 @@ class Settings(BaseSettings):
     apertus_api_key: str
     apertus_model: str = "swiss-ai/apertus-70b-instruct"
 
+    database_url: str
 
 settings = Settings()
