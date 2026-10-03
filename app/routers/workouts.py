@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import Athlete, Set, Workout
+from app.schemas.analysis import RecommendationOut
 from app.schemas.parse import ParseRequest, ParseResponse
 from app.schemas.workout import WorkoutCreate, WorkoutOut
+from app.services.analyzer import analyze_workout
 from app.services.llm import LLMError
 from app.services.parser import parse_workout_text
 
@@ -14,6 +16,7 @@ router = APIRouter(prefix="/workouts", tags=["workouts"])
 
 @router.post("/parse", response_model=ParseResponse)
 def parse_workout(payload: ParseRequest):
+    """Текст тренировки → черновик. Ничего не сохраняет: пользователь сначала проверяет."""
     try:
         return parse_workout_text(payload.text, payload.course)
     except LLMError as e:
@@ -66,6 +69,17 @@ def get_workout_or_404(db: Session, workout_id: int) -> Workout:
 @router.get("/{workout_id}", response_model=WorkoutOut)
 def get_workout(workout_id: int, db: Session = Depends(get_db)):
     return get_workout_or_404(db, workout_id)
+
+
+@router.post("/{workout_id}/analyze", response_model=RecommendationOut)
+def analyze(workout_id: int, db: Session = Depends(get_db)):
+    workout = get_workout_or_404(db, workout_id)
+    try:
+        return analyze_workout(db, workout)
+    except LLMError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)
+        ) from e
 
 
 @router.delete("/{workout_id}", status_code=status.HTTP_204_NO_CONTENT)
