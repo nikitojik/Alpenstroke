@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import settings
 from app.models import AIRecommendation, Athlete, Kind, Workout
 from app.schemas.analysis import Analysis
+from app.services.grounding import body_part_check, ungrounded_body_parts
 from app.services.llm import chat_json
 from app.services.metrics import summarize, to_meters
 
-HISTORY_DAYS = 42
-RECENT_FOR_PROMPT = 14
+HISTORY_DAYS = 42      # хватает на 28-дневное окно ACWR с запасом
+RECENT_FOR_PROMPT = 14  # сколько последних тренировок показываем модели целиком
 
 ANALYZE_SYSTEM = """You are an experienced swim coach with a background in sports science.
 You review a swimmer's recent training and give practical advice.
@@ -27,10 +28,14 @@ Rules:
 - acwr_zone "low" close to the goal event may be an intentional taper (type "taper"), not a problem.
 - Read the notes. Recurring pain, cramps or illness is a concern of type "symptom".
   Link it to a stroke or set when the notes allow it.
+- ONLY IF you report a "symptom" concern tied to a stroke: reduce the load on that stroke
+  (short repeats, drills, broken sets, fins, more rest) instead of removing it completely,
+  especially if it is the stroke of the athlete's goal event.
+  Without a symptom concern, do not suggest reducing or replacing any stroke.
 - If nothing is wrong, return an empty concerns list and recommend continuing the current plan.
   Do not invent problems.
 - Every change you recommend must address one of the listed concerns.
-  Do not suggest changes for issues that are not in the data (for example shoulders, if no notes mention them).
+- Only mention body parts, injuries or symptoms that appear in the swimmer's notes.
 - Keep total volume unchanged unless there is an "overload" concern.
 - The recommendation must be concrete and cover the next 3-7 days, with numbers
   (for example "cut volume by about 20%" or "replace fly sets with freestyle for a week").
@@ -88,18 +93,24 @@ def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
     ).all()
 
     context = build_context(workout.athlete, list(history), on)
+    notes = [w.notes for w in history]
     analysis, raw = chat_json(
         ANALYZE_SYSTEM,
         json.dumps(context, ensure_ascii=False),
         Analysis,
         temperature=0.3,
+        check=body_part_check(notes),
     )
 
     rec = AIRecommendation(
         athlete_id=workout.athlete_id,
         workout_id=workout.id,
         kind=Kind.analysis,
-        recommendation=analysis.model_dump(),
+        recommendation={
+            **analysis.model_dump(),
+            # если модель не исправилась и со второй попытки, это видно здесь
+            "grounding_warnings": ungrounded_body_parts(analysis, notes),
+        },
         raw_response=raw,
         model=settings.apertus_model,
     )

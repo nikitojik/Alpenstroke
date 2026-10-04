@@ -4,7 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Athlete
+from app.schemas.analysis import RecommendationOut
 from app.schemas.athlete import AthleteCreate, AthleteOut, AthleteUpdate
+from app.services.llm import LLMError
+from app.services.planner import generate_plan
 
 router = APIRouter(prefix="/athletes", tags=["athletes"])
 
@@ -48,3 +51,14 @@ def update_athlete(
     db.commit()
     db.refresh(athlete)
     return athlete
+
+
+@router.post("/{athlete_id}/plan", response_model=RecommendationOut)
+def create_plan(athlete_id: int, db: Session = Depends(get_db)):
+    athlete = get_athlete_or_404(db, athlete_id)
+    try:
+        return generate_plan(db, athlete)
+    except LLMError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)
+        ) from e

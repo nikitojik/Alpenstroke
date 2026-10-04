@@ -15,7 +15,9 @@ EXPECTED = {
 def main() -> None:
     with SessionLocal() as db:
         athletes = db.scalars(
-            select(Athlete).where(Athlete.name.startswith(DEMO_PREFIX)).order_by(Athlete.id)
+            select(Athlete)
+            .where(Athlete.name.startswith(DEMO_PREFIX))
+            .order_by(Athlete.id)
         ).all()
         if not athletes:
             print("No demo athletes. Run: python -m scripts.seed")
@@ -31,7 +33,9 @@ def main() -> None:
             rec = analyze_workout(db, latest)
             result = rec.recommendation
 
-            print(f"\n=== {athlete.name}  (expected: {EXPECTED.get(athlete.name, '?')})")
+            print(
+                f"\n=== {athlete.name}  (expected: {EXPECTED.get(athlete.name, '?')})"
+            )
             print(f"confidence: {result['confidence']}")
             print(f"summary: {result['summary']}")
             for c in result["concerns"]:
@@ -39,6 +43,8 @@ def main() -> None:
             if not result["concerns"]:
                 print("  - no concerns")
             print(f"recommendation: {result['recommendation']}")
+            if result.get("grounding_warnings"):
+                print(f"!! not in notes: {', '.join(result['grounding_warnings'])}")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from typing import TypeVar
 
 from openai import OpenAI, OpenAIError
@@ -7,6 +8,9 @@ from pydantic import BaseModel, ValidationError
 from app.config import settings
 
 T = TypeVar("T", bound=BaseModel)
+
+
+MAX_TOKENS = 3000
 
 
 class LLMError(Exception):
@@ -21,13 +25,12 @@ client = OpenAI(
 
 
 def _complete(messages: list[dict], temperature: float) -> str:
-    """Один запрос к модели. Ошибки сети и API превращаются в LLMError."""
     try:
         response = client.chat.completions.create(
             model=settings.apertus_model,
             messages=messages,
             temperature=temperature,
-            max_tokens=1500,
+            max_tokens=MAX_TOKENS,
         )
     except OpenAIError as e:
         raise LLMError(f"model request failed: {e}") from e
@@ -35,11 +38,6 @@ def _complete(messages: list[dict], temperature: float) -> str:
 
 
 def _extract_json(text: str) -> str:
-    """
-    Достаёт JSON-объект из ответа. Модели любят оборачивать ответ
-    в ```json ... ``` или добавлять фразу перед ним, поэтому берём
-    всё от первой '{' до последней '}'.
-    """
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end < start:
         return text
@@ -47,7 +45,6 @@ def _extract_json(text: str) -> str:
 
 
 def _schema_instructions(schema: type[BaseModel]) -> str:
-    """Текст для системного промпта: JSON Schema, сгенерированная из Pydantic."""
     return (
         "\n\nReply with ONLY a JSON object, no other text. "
         "It must match this JSON Schema:\n"
@@ -55,34 +52,52 @@ def _schema_instructions(schema: type[BaseModel]) -> str:
     )
 
 
-def chat_json(system: str, user: str, schema: type[T], temperature: float = 0.3) -> tuple[T, str]:
-    """
-    Отправляет промпт и возвращает (проверенный объект, сырой ответ модели).
-    Сырой ответ сохраняем в базу (raw_response), чтобы потом разбирать ошибки.
-    """
+def _parse(
+    raw: str, schema: type[T], check: Callable[[T], list[str]] | None
+) -> tuple[T | None, list[str]]:
+    """Разбор и проверки. Возвращает (объект или None, список проблем)."""
+    try:
+        obj = schema.model_validate_json(_extract_json(raw))
+    except ValidationError as error:
+        return None, [f"Invalid JSON for the schema: {error.errors(include_url=False)}"]
+    problems = check(obj) if check else []
+    return obj, problems
+
+
+def chat_json(
+    system: str,
+    user: str,
+    schema: type[T],
+    temperature: float = 0.3,
+    check: Callable[[T], list[str]] | None = None,
+) -> tuple[T, str]:
     messages = [
         {"role": "system", "content": system + _schema_instructions(schema)},
         {"role": "user", "content": user},
     ]
 
     raw = _complete(messages, temperature)
-    try:
-        return schema.model_validate_json(_extract_json(raw)), raw
-    except ValidationError as error:
-        messages += [
-            {"role": "assistant", "content": raw},
-            {
-                "role": "user",
-                "content": (
-                    "Your previous answer did not match the required schema. "
-                    f"Errors: {error.errors(include_url=False)}. "
-                    "Reply with ONLY the corrected JSON object."
-                ),
-            },
-        ]
+    obj, problems = _parse(raw, schema, check)
+    if obj is not None and not problems:
+        return obj, raw
 
+    messages += [
+        {"role": "assistant", "content": raw},
+        {
+            "role": "user",
+            "content": (
+                "Your previous answer has problems:\n- "
+                + "\n- ".join(problems)
+                + "\nReply with ONLY the corrected JSON object."
+            ),
+        },
+    ]
     raw = _complete(messages, temperature=0.0)
-    try:
-        return schema.model_validate_json(_extract_json(raw)), raw
-    except ValidationError as error:
-        raise LLMError("model returned invalid output twice") from error
+    obj, problems = _parse(raw, schema, check)
+    if obj is None:
+        reason = problems[0][:300] if problems else "unknown"
+        ending = raw[-80:].replace("\n", " ")
+        raise LLMError(
+            f"model returned invalid output twice. Reason: {reason}. Answer ends with: ...{ending}"
+        )
+    return obj, raw
