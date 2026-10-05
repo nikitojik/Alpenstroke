@@ -1,7 +1,8 @@
 # Alpenstroke
+
 Describe a workout in plain words. Alpenstroke turns it into structured data, tracks your training load, and uses [Apertus](https://huggingface.co/swiss-ai), Switzerland's fully open LLM, to explain what's going on and plan your next week. It is fully self-hostable: your training data never has to leave your own server.
 
-> Built for [Hack Apertus 2026](https://hackapertus.devpost.com/), Track 2B (Own Project).
+> Built for [Hack Apertus 2026](https://hackapertus.ch/), Track 2B (Own Project). The project lives in [`track_2b/`](track_2b/), following the official template.
 
 ---
 
@@ -9,7 +10,7 @@ Describe a workout in plain words. Alpenstroke turns it into structured data, tr
 
 Competitive swimmers log a lot of training, but most logs are either a paper notebook or a rigid app where you fill in every set by hand. Neither one tells you the thing that matters most before a meet: *am I overdoing it?*
 
-Warning signs like rising effort at the same volume, recurring cramps, or a stalled event time are usually spread across weeks of notes. A coach catches them. A swimmer training alone often doesn't.
+Warning signs like rising effort at the same volume, recurring cramps, or a sudden jump in volume are usually spread across weeks of notes. A coach catches them. A swimmer training alone often doesn't.
 
 ## How it works
 
@@ -18,9 +19,9 @@ Warning signs like rising effort at the same volume, recurring cramps, or a stal
                 │
                 ▼
    ┌─────────────────────────┐
-   │ 1. Parse (Apertus)      │  free text → sets, intervals, effort, symptoms
+   │ 1. Parse (Apertus)      │  free text in any language → sets, effort, symptoms
    └────────────┬────────────┘
-                ▼  user confirms
+                ▼  swimmer confirms the draft
    ┌─────────────────────────┐
    │ 2. Metrics (plain code) │  session load, weekly volume, acute:chronic ratio
    └────────────┬────────────┘
@@ -30,111 +31,116 @@ Warning signs like rising effort at the same volume, recurring cramps, or a stal
    └────────────┬────────────┘
                 ▼
    ┌─────────────────────────┐
-   │ 4. Plan (Apertus)       │  goal event + date → next week's plan
+   │ 4. Plan (Apertus)       │  goal event + date → next 7 days
    └─────────────────────────┘
 ```
 
-**Design principle: code does the math, the model does the language.** Training-load metrics are computed deterministically and unit-tested. Apertus is used only where a language model is the right tool: understanding free-text logs and explaining the numbers in plain words. Every model response is validated against a schema before it is stored.
+**Design principle: code does the math, the model does the language.** Training-load metrics, weekly volume targets, dates and totals are computed deterministically and unit-tested. Apertus does what a language model is good at: reading free-text logs and explaining the numbers in plain words. Every model answer is validated against a schema and checked by code before it is stored:
+
+- **Grounding:** the model may only raise a problem with a body part the swimmer actually mentioned. Invented injuries trigger a retry.
+- **Plan rules:** no more than two hard days in a row, a session is never shorter than its main set, races only on the goal date, a caution is required when the analysis found a symptom.
+- **Volume:** the weekly target comes from code. If the model misses it, the days are scaled proportionally.
+- **Honest confidence:** with less than four weeks of history there is no target, no week-over-week comparison, and confidence is forced to low.
 
 ## Features
 
-- [ ] Natural-language workout logging with a confirm-before-save step
-- [ ] Training-load metrics: session load (RPE × minutes), weekly volume, acute:chronic workload ratio
-- [ ] Per-workout analysis with concerns, a recommendation, and a confidence level
-- [ ] Weekly plan generation toward a goal event and date
-- [ ] Feedback loop: mark advice as helpful or not, fed back into later analyses
-- [ ] One-command self-hosted deployment, cloud or local model
+- [x] Natural-language workout logging in any language, with a confirm-before-save step
+- [x] Training-load metrics: session load (RPE × minutes), weekly volume, acute:chronic workload ratio
+- [x] Per-workout analysis with concerns, a recommendation and a confidence level
+- [x] Weekly plan toward a goal event and date
+- [x] Feedback: mark advice as helpful or not
+- [x] Web UI with no external CDNs, plus a JSON API
+- [x] One-command self-hosted deployment
 
-## Sovereign by design
+## Run it
 
-- **Runs anywhere.** `docker compose up` starts the API and Postgres. No external CDNs, analytics, or third-party services.
-- **Swap the model endpoint with one variable.** Point `APERTUS_BASE_URL` at the Public AI inference API, or at your own vLLM server running Apertus on-premise. The app code doesn't change.
-- **Your data stays yours.** Training logs and health notes live in your own database.
-
-## Quickstart
+Requirements: Docker with Compose, and an OpenAI-compatible endpoint serving Apertus.
 
 ```bash
-git clone https://github.com/<you>/Alpenstroke.git
-cd Alpenstroke
-cp .env.example .env        # add your APERTUS_API_KEY
-docker compose up --build
+git clone https://github.com/nikitojik/alpenstroke.git
+cd alpenstroke/track_2b
+cp .env.example .env        # set LLM_API_KEY (and LLM_NAME / LLM_BASE_URL if needed)
+make run
 ```
 
-Then open http://localhost:8000/docs for the interactive API docs.
+Open http://localhost:8000. On first start the database is migrated and three demo swimmers are created:
 
-### Running against a local Apertus model
+| Swimmer | What the data shows |
+|---|---|
+| Demo: Steady | six even weeks, nothing to fix |
+| Demo: Spike | last week's volume jumped (ACWR 1.63, overload) |
+| Demo: Cramps | recurring calf cramps on butterfly in the notes |
 
-```bash
-pip install vllm
-vllm serve swiss-ai/Apertus-v1.5-8B --port 8001
-```
-
-Then set these in `.env`:
-
-```
-APERTUS_BASE_URL=http://host.docker.internal:8001/v1
-APERTUS_MODEL=swiss-ai/Apertus-v1.5-8B
-APERTUS_API_KEY=not-needed
-```
+Other targets: `make up` (background), `make down`, `make logs`, `make seed` (recreate the demo swimmers), `make test` (unit tests, no network or database).
 
 ## Configuration
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | Postgres connection string | set by `docker-compose.yml` |
-| `APERTUS_BASE_URL` | Any OpenAI-compatible endpoint serving Apertus | `https://api.publicai.co/v1` |
-| `APERTUS_API_KEY` | API key for that endpoint | — |
-| `APERTUS_MODEL` | Model name | `swiss-ai/apertus-70b-instruct` |
+| `LLM_NAME` | Model name on the endpoint | `swiss-ai/apertus-70b-instruct` |
+| `LLM_BASE_URL` | Any OpenAI-compatible endpoint serving Apertus | `https://api.publicai.co/v1` |
+| `LLM_API_KEY` | API key for that endpoint | required |
+| `POSTGRES_PASSWORD` | Database password, set your own on a server | `alpenstroke` |
+| `APP_PORT` | Port on the host | `8000` |
+
+## Sovereign by design
+
+- **No third parties at runtime.** Fonts and scripts are served by the app itself. The only outbound connection is to `LLM_BASE_URL`.
+- **Swap the model endpoint with one variable.** Point `LLM_BASE_URL` at a hosted Apertus endpoint, or at your own vLLM or llama.cpp server running Apertus on-premise. The app code doesn't change.
+- **Your data stays yours.** Training logs and health notes live in your own Postgres. The athlete's name is never sent to the model.
 
 ## API
 
+Interactive docs at http://localhost:8000/docs.
+
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `GET` | `/health` | Liveness check |
+| `GET` | `/health`, `/health/db` | Liveness and database checks |
 | `POST` | `/athletes` | Create an athlete profile |
-| `GET` | `/athletes/{id}` | Get a profile |
+| `GET` / `PATCH` | `/athletes/{id}` | Get or update a profile |
 | `POST` | `/workouts/parse` | Free text → structured workout draft (not saved) |
 | `POST` | `/workouts` | Save a confirmed workout |
-| `GET` | `/workouts/athlete/{id}` | Workout history |
-| `POST` | `/workouts/{id}/analyze` | Analyze a workout in context |
-| `POST` | `/athletes/{id}/plan` | Generate next week's plan |
-
-## Evaluation
-
-*Results coming soon.* A set of synthetic athlete scenarios (`evals/scenarios/`) compares Apertus 8B and 70B on:
-
-| Metric | 8B | 70B |
-|---|---|---|
-| Valid-JSON rate | – | – |
-| Overload correctly flagged | – | – |
-| Median latency | – | – |
-| Tokens per analysis | – | – |
+| `GET` | `/workouts?athlete_id={id}` | Workout history |
+| `POST` | `/workouts/{id}/analyze` | Analyze a workout in the context of the last six weeks |
+| `POST` | `/athletes/{id}/plan` | Generate the next 7 days |
 
 ## Project structure
 
 ```
-app/
-  main.py            FastAPI app and router wiring
-  config.py          Settings from environment variables
-  db.py              SQLAlchemy engine and session
-  models.py          ORM models
-  schemas.py         Pydantic request/response schemas
-  routers/           HTTP endpoints
-  services/
-    llm.py           Apertus client and schema-validated calls
-    metrics.py       Deterministic training-load metrics
-scripts/seed.py      Synthetic athletes and workouts for demos and evals
-evals/               Model evaluation scenarios and runner
-tests/               Unit tests
+track_2b/
+  Makefile               make run, up, down, logs, seed, test
+  Dockerfile             app image (non-root, healthcheck)
+  docker-compose.yml     app + Postgres 16
+  technical_report.md    architecture, evaluation, limitations
+  src/
+    app/
+      main.py            FastAPI app
+      config.py          settings from LLM_* and DATABASE_URL
+      models/            SQLAlchemy models
+      schemas/           Pydantic schemas, also used to validate model output
+      routers/           JSON API
+      web/, templates/   web UI (Jinja2 + HTMX)
+      services/
+        llm.py           Apertus client: schema-validated JSON with one retry
+        parser.py        free text → workout
+        metrics.py       deterministic training-load metrics
+        grounding.py     body-part grounding check
+        analyzer.py      workout analysis
+        planner.py       weekly plan and its code checks
+    migrations/          Alembic
+    scripts/             demo data and demo runners
+    tests/               unit tests
+  data/                  evaluation data
+  docs/                  diagrams and notes
 ```
 
 ## Tech stack
 
-Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · PostgreSQL 16 · Pydantic · OpenAI-compatible client · Docker Compose · Apertus
+Python 3.12 · FastAPI · SQLAlchemy 2 · Alembic · PostgreSQL 16 · Pydantic · Jinja2 + HTMX · OpenAI-compatible client · Docker Compose · Apertus
 
 ## Disclaimer
 
-Alpenstroke is a training aid, not medical advice. Recurring pain, cramps, or other symptoms should be discussed with a coach or a medical professional.
+Alpenstroke is a training aid, not medical advice. Recurring pain, cramps or other symptoms should be discussed with a coach or a medical professional.
 
 ## License
 
@@ -142,4 +148,4 @@ Alpenstroke is a training aid, not medical advice. Recurring pain, cramps, or ot
 
 ## Team
 
-- Nikita Kolesnikov — backend, AI integration
+- Nikita Kolesnikov
