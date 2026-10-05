@@ -1,0 +1,11 @@
+<div class="feedback" id="feedback-{{ rec.id }}">
+  {% if rec.was_helpful is none %}
+    <span>Was this useful?</span>
+    <button class="btn btn--quiet" type="button" hx-post="/recommendations/{{ rec.id }}/feedback"
+            hx-vals='{"helpful": "yes"}' hx-target="#feedback-{{ rec.id }}" hx-swap="outerHTML">Yes</button>
+    <button class="btn btn--quiet" type="button" hx-post="/recommendations/{{ rec.id }}/feedback"
+            hx-vals='{"helpful": "no"}' hx-target="#feedback-{{ rec.id }}" hx-swap="outerHTML">No</button>
+  {% else %}
+    <span>Marked as {{ 'useful' if rec.was_helpful else 'not useful' }}. Thanks.</span>
+  {% endif %}
+</div>

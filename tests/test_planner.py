@@ -6,7 +6,14 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.plan import PlanDay, WeeklyPlan
-from app.services.planner import finalize, hard_days_problems, volume_target
+from app.services.planner import (
+    cautions_problems,
+    finalize,
+    hard_days_problems,
+    main_set_problems,
+    main_set_volume,
+    volume_target,
+)
 
 START = date(2026, 10, 4)
 
@@ -156,3 +163,62 @@ def test_rest_day_may_have_no_focus():
     # модель ставит focus: null в день отдыха, это нормальный ответ
     day = PlanDay(date=START, session_type="rest", distance_m=0, focus=None)
     assert day.focus is None
+
+
+# ---------- объём основной серии ----------
+
+def test_main_set_volume_parses_swimmer_notation():
+    assert main_set_volume("10x200 freestyle @2:30") == 2000
+    assert main_set_volume("8 x 50 fly drill w/ fins") == 400
+    assert main_set_volume("8x50 broken into 2x25") == 400  # вторая часть описывает ту же серию
+    assert main_set_volume("easy swim") == 0
+    assert main_set_volume(None) == 0
+
+
+def test_day_shorter_than_its_main_set_is_a_problem():
+    # как в прогоне Nikita: 10x200 = 2000 м в день на 600 м
+    plan = make_plan(WEEK)
+    plan.days[3].main_set = "10x200 freestyle @2:30"
+    plan.days[3].distance_m = 600
+    problems = main_set_problems(plan)
+    assert len(problems) == 1 and "2000" in problems[0]
+
+
+def test_scaling_never_shrinks_a_day_below_its_main_set():
+    plan = make_plan(WEEK)
+    plan.days[0].main_set = "10x200 freestyle @2:30"  # 2000 м
+    target = {"min": 3000, "max": 3600, "reason": "r"}  # абсурдно маленькая цель
+    days = finalize(plan, START, last_week_m=3400, target=target)["days"]
+    assert days[0]["distance_m"] >= 2000
+
+
+def test_no_target_with_short_history_even_if_last_week_has_volume():
+    # одна тренировка 3400 м: «прошлая неделя» есть, но истории меньше четырёх недель
+    assert volume_target(metrics(3400, "insufficient_history"), None, days_to_goal=41) is None
+
+
+# ---------- короткая история и предупреждения ----------
+
+def test_no_change_pct_with_short_history():
+    # как у Nikita: одна тренировка 3400 м, план 14.3 км -> «+321%» ничего не значит
+    result = finalize(make_plan(WEEK), START, last_week_m=3400, enough_history=False)
+    assert result["change_vs_last_week_pct"] is None
+    assert result["enough_history"] is False
+
+
+SYMPTOM = {"concerns": [{"type": "symptom", "detail": "shoulder pain on fly"}]}
+
+
+def test_symptom_without_cautions_is_a_problem():
+    assert len(cautions_problems(make_plan(WEEK), SYMPTOM)) == 1
+
+
+def test_symptom_with_cautions_is_fine():
+    plan = make_plan(WEEK)
+    plan.cautions = "Fly is in short repeats; talk to a coach if the shoulder pain continues."
+    assert cautions_problems(plan, SYMPTOM) == []
+
+
+def test_no_symptom_needs_no_cautions():
+    assert cautions_problems(make_plan(WEEK), {"concerns": []}) == []
+    assert cautions_problems(make_plan(WEEK), None) == []

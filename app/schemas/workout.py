@@ -27,6 +27,7 @@ class WorkoutCreate(BaseModel):
     total_distance: int = Field(gt=0)
     perceived_effort: int = Field(ge=1, le=10)
     notes: str | None = None
+    symptoms: list[str] = []
     sets: list[SetIn] = []
 
 

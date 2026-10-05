@@ -16,6 +16,7 @@ class Stroke(enum.Enum):
     breaststroke = "breaststroke"
     backstroke = "backstroke"
     medley = "medley"
+    choice = "choice"
 
 
 class Set(Base):

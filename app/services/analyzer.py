@@ -7,11 +7,15 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import settings
 from app.models import AIRecommendation, Athlete, Kind, Workout
 from app.schemas.analysis import Analysis
-from app.services.grounding import body_part_check, ungrounded_body_parts
+from app.services.grounding import (
+    body_part_check,
+    grounding_sources,
+    ungrounded_body_parts,
+)
 from app.services.llm import chat_json
 from app.services.metrics import summarize, to_meters
 
-HISTORY_DAYS = 42      # хватает на 28-дневное окно ACWR с запасом
+HISTORY_DAYS = 42  # хватает на 28-дневное окно ACWR с запасом
 RECENT_FOR_PROMPT = 14  # сколько последних тренировок показываем модели целиком
 
 ANALYZE_SYSTEM = """You are an experienced swim coach with a background in sports science.
@@ -57,12 +61,16 @@ def _set_line(s) -> str:
 
 def build_context(athlete: Athlete, workouts: list[Workout], on: date) -> dict:
     """Собирает данные для промпта. Имя спортсмена модели не отправляем: оно ей не нужно."""
-    recent = sorted(workouts, key=lambda w: w.workout_date, reverse=True)[:RECENT_FOR_PROMPT]
+    recent = sorted(workouts, key=lambda w: w.workout_date, reverse=True)[
+        :RECENT_FOR_PROMPT
+    ]
     return {
         "athlete": {
             "main_strokes": athlete.main_strokes,
             "goal_event": athlete.goal_event,
-            "days_to_goal": (athlete.goal_date - on).days if athlete.goal_date else None,
+            "days_to_goal": (
+                (athlete.goal_date - on).days if athlete.goal_date else None
+            ),
         },
         "metrics": summarize(workouts, on),
         "recent_workouts": [
@@ -74,10 +82,21 @@ def build_context(athlete: Athlete, workouts: list[Workout], on: date) -> dict:
                 "rpe": w.perceived_effort,
                 "sets": [_set_line(s) for s in w.sets],
                 "notes": w.notes,
+                "symptoms": w.symptoms or [],
             }
             for w in recent
         ],
     }
+
+
+def enforce_confidence(analysis: Analysis, acwr_zone: str) -> Analysis:
+    """
+    Без четырёх недель истории уверенность всегда низкая. Это одно условие,
+    поэтому его выставляет код, а не просьба в промпте.
+    """
+    if acwr_zone == "insufficient_history":
+        analysis.confidence = "low"
+    return analysis
 
 
 def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
@@ -93,7 +112,7 @@ def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
     ).all()
 
     context = build_context(workout.athlete, list(history), on)
-    notes = [w.notes for w in history]
+    notes = grounding_sources(history)
     analysis, raw = chat_json(
         ANALYZE_SYSTEM,
         json.dumps(context, ensure_ascii=False),
@@ -101,6 +120,7 @@ def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
         temperature=0.3,
         check=body_part_check(notes),
     )
+    analysis = enforce_confidence(analysis, context["metrics"]["acwr_zone"])
 
     rec = AIRecommendation(
         athlete_id=workout.athlete_id,
@@ -108,7 +128,6 @@ def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
         kind=Kind.analysis,
         recommendation={
             **analysis.model_dump(),
-            # если модель не исправилась и со второй попытки, это видно здесь
             "grounding_warnings": ungrounded_body_parts(analysis, notes),
         },
         raw_response=raw,

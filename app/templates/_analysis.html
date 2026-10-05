@@ -1,0 +1,27 @@
+{% set r = rec.recommendation %}
+<article class="read">
+  <p class="read__meta">{{ rec.created_at.strftime('%d %b, %H:%M') }}, confidence {{ r.confidence }}</p>
+  <p>{{ r.summary }}</p>
+
+  {% if r.concerns %}
+  <ul class="concerns">
+    {% for c in r.concerns %}
+    <li class="concern concern--{{ c.type }}">
+      <span class="concern__type">{{ concern_label(c.type) }}</span>
+      {{ c.detail }}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="all-clear">No concerns this week.</p>
+  {% endif %}
+
+  <h3>What to do</h3>
+  <p>{{ r.recommendation }}</p>
+
+  {% if r.grounding_warnings %}
+  <p class="check">Mentions {{ r.grounding_warnings | join(', ') }}, which your notes do not. Take that part with caution.</p>
+  {% endif %}
+
+  {% include "_feedback.html" %}
+</article>

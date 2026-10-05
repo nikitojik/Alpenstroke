@@ -1,0 +1,16 @@
+{# Разделительная дорожка: шкала нагрузки (ACWR) с меткой спортсмена. #}
+{% macro lane_rope(acwr, zone) %}
+<div class="rope" role="img"
+     aria-label="Load ratio {{ acwr if acwr is not none else 'unknown' }}: {{ zone_label(zone) }}">
+  {% if acwr is not none %}
+    <span class="rope__marker" style="left: {{ rope_position(acwr) }}%">{{ acwr }}</span>
+  {% endif %}
+  <div class="rope__track" aria-hidden="true">
+    <span class="rope__seg rope__seg--low"></span>
+    <span class="rope__seg rope__seg--ok"></span>
+    <span class="rope__seg rope__seg--high"></span>
+    <span class="rope__seg rope__seg--spike"></span>
+  </div>
+  <p class="rope__zone rope__zone--{{ 'none' if acwr is none else zone }}">{{ zone_label(zone) }}</p>
+</div>
+{% endmacro %}

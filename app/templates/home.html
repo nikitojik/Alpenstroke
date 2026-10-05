@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import lane_rope %}
+
+{% block content %}
+<h1>Athletes</h1>
+<p class="lede">The rope shows each swimmer's load this week against the last four.
+  Blue is on track, yellow is building fast, red is overload.</p>
+
+{% if rows %}
+<ul class="roster">
+  {% for row in rows %}
+  <li class="roster__item">
+    <a class="swimmer" href="/swimmers/{{ row.athlete.id }}">
+      <div>
+        <p class="swimmer__name">{{ row.athlete.name }}</p>
+        <p class="swimmer__goal">
+          {% if row.athlete.goal_event and row.days_to_goal is not none %}
+            {{ row.athlete.goal_event }} in {{ row.days_to_goal }} days
+          {% else %}
+            No goal event set
+          {% endif %}
+        </p>
+        <p class="swimmer__stats">
+          Last 7 days: <strong>{{ row.metrics.volume_last_7d_m | km }}</strong>,
+          <strong>{{ row.metrics.sessions_last_7d }}</strong> session{{ '' if row.metrics.sessions_last_7d == 1 else 's' }}{% if row.metrics.avg_rpe_last_7d %},
+          RPE <strong>{{ row.metrics.avg_rpe_last_7d }}</strong>{% endif %}
+        </p>
+      </div>
+      {{ lane_rope(row.metrics.acwr, row.metrics.acwr_zone) }}
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty">
+  <p>No athletes yet. Add the demo swimmers with <code>python -m scripts.seed</code>,
+    or create one through <a href="/docs">the API</a>.</p>
+</div>
+{% endif %}
+{% endblock %}

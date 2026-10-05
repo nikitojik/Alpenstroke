@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "_macros.html" import lane_rope %}
+
+{% block title %}{{ athlete.name }} | Alpenstroke{% endblock %}
+
+{% block content %}
+<a class="back" href="/">All athletes</a>
+
+<section class="head">
+  <div>
+    <h1>{{ athlete.name }}</h1>
+    <p class="lede">
+      {% if athlete.goal_event and days_to_goal is not none %}
+        {{ athlete.goal_event }} in {{ days_to_goal }} days, on {{ athlete.goal_date.strftime('%d %B') }}
+      {% else %}No goal event set{% endif %}
+    </p>
+    <p class="swimmer__stats">
+      Last 7 days: <strong>{{ metrics.volume_last_7d_m | km }}</strong>,
+      <strong>{{ metrics.sessions_last_7d }}</strong> session{{ '' if metrics.sessions_last_7d == 1 else 's' }}{% if metrics.avg_rpe_last_7d %},
+      RPE <strong>{{ metrics.avg_rpe_last_7d }}</strong>{% endif %}
+    </p>
+  </div>
+  {{ lane_rope(metrics.acwr, metrics.acwr_zone) }}
+</section>
+
+<div class="split">
+  <section class="column">
+    <h2>Log a workout</h2>
+    <form class="log-form" hx-post="/swimmers/{{ athlete.id }}/parse" hx-target="#draft"
+          hx-indicator="#parse-wait" hx-disabled-elt="find button">
+      <label for="log-text">Write it the way you would tell your coach, in any language</label>
+      <textarea id="log-text" name="text" rows="4" required
+        placeholder="400 warm up, 10x100 free on 1:30, 8x50 fly, last 3 hard. Calf cramp again. 90 min, felt like a 7."></textarea>
+      <div class="log-form__row">
+        <label>Pool
+          <select name="course">
+            <option value="">Not sure</option>
+            {% for value, label in course_labels.items() %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button class="btn" type="submit">Read workout</button>
+        <span id="parse-wait" class="wait">Apertus is reading your log</span>
+      </div>
+    </form>
+    <div id="draft"></div>
+
+    <h2>Recent workouts</h2>
+    {% if recent %}
+    <ol class="entries">
+      {% for w in recent %}
+      <li class="entry">
+        <div class="entry__head">
+          <span class="entry__date">{{ w.workout_date.strftime('%a %d %b') }}</span>
+          <span class="entry__numbers">{{ w.total_distance }} {{ w.course | unit }}, {{ w.duration_min }} min, RPE {{ w.perceived_effort }}</span>
+          <button class="btn btn--quiet" type="button"
+                  hx-post="/swimmers/{{ athlete.id }}/workouts/{{ w.id }}/analyze"
+                  hx-target="#analysis" hx-swap="innerHTML show:top" hx-indicator="#analysis-wait"
+                  hx-disabled-elt="this">Analyze</button>
+        </div>
+        {% if w.sets %}
+        <ul class="sets">
+          {% for s in w.sets %}<li>{{ s | set_line }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if w.notes %}<p class="entry__notes">{{ w.notes }}</p>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="note">No workouts in the last six weeks. Log one above to get started.</p>
+    {% endif %}
+  </section>
+
+  <aside class="column coach">
+    <section class="panel">
+      <h2>Coach's read</h2>
+      <span id="analysis-wait" class="wait">Reading the last six weeks</span>
+      <div id="analysis">
+        {% if analysis %}
+          {% with rec = analysis %}{% include "_analysis.html" %}{% endwith %}
+        {% else %}
+          <p class="note">Press Analyze on a workout to see how the last six weeks are going.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Next 7 days</h2>
+      <div class="panel__actions">
+        <button class="btn" type="button" hx-post="/swimmers/{{ athlete.id }}/plan"
+                hx-target="#plan" hx-indicator="#plan-wait" hx-disabled-elt="this">Plan next week</button>
+        <span id="plan-wait" class="wait">Building the week</span>
+      </div>
+      <div id="plan">
+        {% if plan %}
+          {% with rec = plan %}{% include "_plan.html" %}{% endwith %}
+        {% endif %}
+      </div>
+    </section>
+  </aside>
+</div>
+{% endblock %}

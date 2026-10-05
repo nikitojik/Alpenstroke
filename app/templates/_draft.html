@@ -1,0 +1,51 @@
+{# Черновик после разбора: пользователь проверяет и дополняет, потом сохраняет. #}
+<form class="draft" hx-post="/swimmers/{{ athlete_id }}/workouts" hx-target="#draft-errors"
+      hx-disabled-elt="find button">
+  <h3>Check before saving</h3>
+  {% if missing_labels %}
+    <p class="draft__missing">Your log did not say: {{ missing_labels | join(', ') }}. Fill these in below.</p>
+  {% endif %}
+
+  <div class="fields">
+    <label>Date
+      <input type="date" name="workout_date" value="{{ today.isoformat() }}" required>
+    </label>
+    <label>Pool
+      <select name="course" required>
+        <option value="" disabled {% if not draft.course %}selected{% endif %}>Choose</option>
+        {% for value, label in course_labels.items() %}
+        <option value="{{ value }}" {% if draft.course and draft.course.value == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Minutes
+      <input type="number" name="duration_min" min="1" max="600" value="{{ draft.duration_min or '' }}" required>
+    </label>
+    <label>Effort, 1 to 10
+      <input type="number" name="perceived_effort" min="1" max="10" value="{{ draft.perceived_effort or '' }}" required>
+    </label>
+    <label>Distance
+      <input type="number" name="total_distance" min="1" value="{{ draft.total_distance or '' }}"
+             {% if draft.sets %}readonly title="Added up from the sets"{% endif %} required>
+    </label>
+  </div>
+
+  {% if draft.sets %}
+  <ul class="sets">
+    {% for s in draft.sets %}<li>{{ s | set_line }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if draft.symptoms %}
+    <p class="draft__symptoms">Symptoms found: {{ draft.symptoms | join(', ') }}</p>
+  {% endif %}
+
+  <label class="draft__notes">Notes
+    <textarea name="notes" rows="3">{{ notes }}</textarea>
+  </label>
+  <input type="hidden" name="sets_json" value="{{ sets_json }}">
+  <input type="hidden" name="symptoms_json" value="{{ symptoms_json }}">
+
+  <div id="draft-errors"></div>
+  <button class="btn" type="submit">Save workout</button>
+</form>

@@ -1,3 +1,9 @@
+"""
+Тесты разбора без сети: подменяем chat_json и проверяем то, что делает
+НАШ код после ответа модели (пересчёт дистанции, подсказка бассейна,
+список незаполненных полей, ошибка 502).
+"""
+
 from fastapi.testclient import TestClient
 
 from app.main import app as api
@@ -14,11 +20,16 @@ def fake_chat_json(monkeypatch, result: ParsedWorkout):
 
 def test_total_distance_is_computed_by_code(monkeypatch):
     # Модель ошиблась в сумме: 2000 вместо 10*100 + 8*50 = 1400
-    fake_chat_json(monkeypatch, ParsedWorkout(
-        total_distance=2000,
-        sets=[SetIn(stroke=Stroke.freestyle, distance=100, reps=10),
-              SetIn(stroke=Stroke.fly, distance=50, reps=8)],
-    ))
+    fake_chat_json(
+        monkeypatch,
+        ParsedWorkout(
+            total_distance=2000,
+            sets=[
+                SetIn(stroke=Stroke.freestyle, distance=100, reps=10),
+                SetIn(stroke=Stroke.fly, distance=50, reps=8),
+            ],
+        ),
+    )
     result = parser.parse_workout_text("10x100 free, 8x50 fly")
     assert result.total_distance == 1400
 
@@ -30,21 +41,31 @@ def test_course_hint_overrides_model(monkeypatch):
 
 
 def test_missing_lists_fields_needed_to_save(monkeypatch):
-    fake_chat_json(monkeypatch, ParsedWorkout(
-        course=Course.SCY,
-        sets=[SetIn(stroke=Stroke.freestyle, distance=400)],
-    ))
+    fake_chat_json(
+        monkeypatch,
+        ParsedWorkout(
+            course=Course.SCY,
+            sets=[SetIn(stroke=Stroke.freestyle, distance=400)],
+        ),
+    )
     result = parser.parse_workout_text("400 warm up in yards")
     assert result.missing == ["duration_min", "perceived_effort"]
 
 
 def test_endpoint_returns_draft(monkeypatch):
-    fake_chat_json(monkeypatch, ParsedWorkout(
-        course=Course.SCY, duration_min=90, perceived_effort=7,
-        sets=[SetIn(stroke=Stroke.fly, distance=50, reps=8, interval_s=50)],
-        symptoms=["calf cramp"],
-    ))
-    r = TestClient(api).post("/workouts/parse", json={"text": "8x50 fly on :50, calf cramp"})
+    fake_chat_json(
+        monkeypatch,
+        ParsedWorkout(
+            course=Course.SCY,
+            duration_min=90,
+            perceived_effort=7,
+            sets=[SetIn(stroke=Stroke.fly, distance=50, reps=8, interval_s=50)],
+            symptoms=["calf cramp"],
+        ),
+    )
+    r = TestClient(api).post(
+        "/workouts/parse", json={"text": "8x50 fly on :50, calf cramp"}
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["total_distance"] == 400
@@ -59,3 +80,20 @@ def test_endpoint_returns_502_when_model_fails(monkeypatch):
     monkeypatch.setattr(parser, "chat_json", broken)
     r = TestClient(api).post("/workouts/parse", json={"text": "10x100 free"})
     assert r.status_code == 502
+
+
+# ---------- симптомы на английском ----------
+
+from app.services.parser import english_symptoms_check  # noqa: E402
+
+
+def test_russian_symptom_is_rejected():
+    problems = english_symptoms_check(ParsedWorkout(symptoms=["боли в плечах"]))
+    assert len(problems) == 1 and "English" in problems[0]
+
+
+def test_english_symptoms_pass():
+    assert (
+        english_symptoms_check(ParsedWorkout(symptoms=["shoulder pain", "calf cramp"]))
+        == []
+    )

@@ -3,13 +3,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.models import Athlete, Set, Workout
+from app.models import Athlete, Workout
 from app.schemas.analysis import RecommendationOut
 from app.schemas.parse import ParseRequest, ParseResponse
 from app.schemas.workout import WorkoutCreate, WorkoutOut
 from app.services.analyzer import analyze_workout
 from app.services.llm import LLMError
 from app.services.parser import parse_workout_text
+from app.services.workouts import save_workout
 
 router = APIRouter(prefix="/workouts", tags=["workouts"])
 
@@ -20,25 +21,14 @@ def parse_workout(payload: ParseRequest):
     try:
         return parse_workout_text(payload.text, payload.course)
     except LLMError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)
-        ) from e
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
 
 @router.post("", response_model=WorkoutOut, status_code=status.HTTP_201_CREATED)
 def create_workout(payload: WorkoutCreate, db: Session = Depends(get_db)):
     if db.get(Athlete, payload.athlete_id) is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found"
-        )
-
-    workout = Workout(**payload.model_dump(exclude={"sets"}))
-    workout.sets = [Set(**s.model_dump()) for s in payload.sets]
-
-    db.add(workout)  # подходы сохранятся вместе с тренировкой (cascade)
-    db.commit()
-    db.refresh(workout)
-    return workout
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    return save_workout(db, payload)
 
 
 @router.get("", response_model=list[WorkoutOut])
@@ -60,9 +50,7 @@ def list_workouts(
 def get_workout_or_404(db: Session, workout_id: int) -> Workout:
     workout = db.get(Workout, workout_id)
     if workout is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workout not found")
     return workout
 
 
@@ -77,9 +65,7 @@ def analyze(workout_id: int, db: Session = Depends(get_db)):
     try:
         return analyze_workout(db, workout)
     except LLMError as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)
-        ) from e
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
 
 @router.delete("/{workout_id}", status_code=status.HTTP_204_NO_CONTENT)

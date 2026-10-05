@@ -1,0 +1,39 @@
+{% set p = rec.recommendation %}
+<article class="plan">
+  <p>{{ p.summary }}</p>
+  <p class="plan__totals">
+    <strong>{{ p.total_distance_m | km }}</strong> planned{% if p.change_vs_last_week_pct is not none %},
+    {{ '%+d' | format(p.change_vs_last_week_pct) }}% against last week{% endif %}
+  </p>
+  {% if p.enough_history is false %}
+    <p class="note">Less than four weeks of history, so there is no weekly target or comparison yet.
+      The plan is built from your recent sessions.</p>
+  {% endif %}
+
+  <table class="week">
+    <thead>
+      <tr><th scope="col">Day</th><th scope="col">Session</th><th scope="col" class="num">Metres</th><th scope="col">Main set</th></tr>
+    </thead>
+    <tbody>
+      {% for d in p.days %}
+      <tr class="session session--{{ d.session_type }}">
+        <td class="week__day">{{ d.date | day_label }}</td>
+        <td><span class="session__type">{{ d.session_type | replace('_', ' ') }}</span>
+          {% if d.focus %}<span class="session__focus">{{ d.focus }}</span>{% endif %}</td>
+        <td class="num">{{ d.distance_m if d.distance_m else '' }}</td>
+        <td class="week__set">{{ d.main_set or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if p.cautions %}<p class="cautions">{{ p.cautions }}</p>{% endif %}
+  {% if p.volume_scaled_by %}
+    <p class="note">Daily distances were adjusted so the week lands in the {{ p.volume_target_m.min | km }} to {{ p.volume_target_m.max | km }} target.</p>
+  {% endif %}
+  {% if p.grounding_warnings %}
+    <p class="check">Mentions {{ p.grounding_warnings | join(', ') }}, which your notes do not. Take that part with caution.</p>
+  {% endif %}
+
+  {% include "_feedback.html" %}
+</article>
