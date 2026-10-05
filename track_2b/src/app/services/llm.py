@@ -18,8 +18,8 @@ class LLMError(Exception):
 
 
 client = OpenAI(
-    base_url=settings.apertus_base_url,
-    api_key=settings.apertus_api_key,
+    base_url=settings.llm_base_url,
+    api_key=settings.llm_api_key,
     timeout=60,
 )
 
@@ -27,7 +27,7 @@ client = OpenAI(
 def _complete(messages: list[dict], temperature: float) -> str:
     try:
         response = client.chat.completions.create(
-            model=settings.apertus_model,
+            model=settings.llm_name,
             messages=messages,
             temperature=temperature,
             max_tokens=MAX_TOKENS,

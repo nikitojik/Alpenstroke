@@ -1,3 +1,4 @@
+import argparse
 import random
 from datetime import date, timedelta
 
@@ -136,8 +137,21 @@ PROFILES = [
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Create three demo athletes with six weeks of workouts.")
+    parser.add_argument(
+        "--if-empty", action="store_true",
+        help="do nothing if the database already has athletes (used on container start)",
+    )
+    args = parser.parse_args()
+
     end = date.today()
     with SessionLocal() as db:
+        # При запуске контейнера: демо-данные нужны только на пустой базе,
+        # иначе каждый перезапуск сбрасывал бы демо-спортсменов и их рекомендации
+        if args.if_empty and db.scalar(select(Athlete.id).limit(1)) is not None:
+            print("Database already has athletes, demo data not created.")
+            return
+
         # Удаляем прошлые демо-данные; тренировки, подходы и рекомендации
         # удалит сама база по ON DELETE CASCADE
         db.execute(delete(Athlete).where(Athlete.name.startswith(DEMO_PREFIX)))

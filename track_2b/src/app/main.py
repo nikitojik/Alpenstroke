@@ -38,4 +38,4 @@ def health_db(db: Session = Depends(get_db)):
 
 @app.get("/info")
 def info():
-    return {"title": app.title, "version": app.version, "model": settings.apertus_model}
+    return {"title": app.title, "version": app.version, "model": settings.llm_name}

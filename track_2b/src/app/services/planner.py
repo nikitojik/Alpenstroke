@@ -318,7 +318,7 @@ def generate_plan(db: Session, athlete: Athlete) -> AIRecommendation:
             "rule_warnings": rule_warnings,
         },
         raw_response=raw,
-        model=settings.apertus_model,
+        model=settings.llm_name,
     )
     db.add(rec)
     db.commit()

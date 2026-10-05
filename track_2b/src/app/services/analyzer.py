@@ -131,7 +131,7 @@ def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
             "grounding_warnings": ungrounded_body_parts(analysis, notes),
         },
         raw_response=raw,
-        model=settings.apertus_model,
+        model=settings.llm_name,
     )
     db.add(rec)
     db.commit()

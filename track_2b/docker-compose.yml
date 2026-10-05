@@ -11,15 +11,17 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U alpenstroke" ]
+      test: ["CMD-SHELL", "pg_isready -U alpenstroke"]
       interval: 5s
       retries: 10
 
   app:
     build: .
     restart: unless-stopped
-    env_file: .env
     environment:
+      LLM_NAME: ${LLM_NAME:-swiss-ai/apertus-70b-instruct}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.publicai.co/v1}
+      LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in the environment or in track_2b/.env}
       DATABASE_URL: postgresql+psycopg://alpenstroke:${POSTGRES_PASSWORD:-alpenstroke}@db:5432/alpenstroke
     ports:
       - "${APP_PORT:-8000}:8000"

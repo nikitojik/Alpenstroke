@@ -1,0 +1,13 @@
+# В образ попадает только то, что нужно для запуска (Dockerfile копирует из src/)
+.env
+.env.*
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.DS_Store
+src/tests
+data
+docs
+*.md
