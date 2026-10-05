@@ -1,18 +1,31 @@
 services:
   db:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: alpenstroke
-      POSTGRES_PASSWORD: alpenstroke
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-alpenstroke}
       POSTGRES_DB: alpenstroke
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U alpenstroke"]
+      test: [ "CMD-SHELL", "pg_isready -U alpenstroke" ]
       interval: 5s
       retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://alpenstroke:${POSTGRES_PASSWORD:-alpenstroke}@db:5432/alpenstroke
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   pgdata:
