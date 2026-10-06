@@ -99,6 +99,22 @@ def enforce_confidence(analysis: Analysis, acwr_zone: str) -> Analysis:
     return analysis
 
 
+def run_analysis(
+    athlete: Athlete, history: list[Workout], on: date
+) -> tuple[Analysis, str, list[str]]:
+    context = build_context(athlete, history, on)
+    notes = grounding_sources(history)
+    analysis, raw = chat_json(
+        ANALYZE_SYSTEM,
+        json.dumps(context, ensure_ascii=False),
+        Analysis,
+        temperature=0.3,
+        check=body_part_check(notes),
+    )
+    analysis = enforce_confidence(analysis, context["metrics"]["acwr_zone"])
+    return analysis, raw, ungrounded_body_parts(analysis, notes)
+
+
 def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
     on = workout.workout_date
     history = db.scalars(
@@ -111,25 +127,13 @@ def analyze_workout(db: Session, workout: Workout) -> AIRecommendation:
         .options(selectinload(Workout.sets))
     ).all()
 
-    context = build_context(workout.athlete, list(history), on)
-    notes = grounding_sources(history)
-    analysis, raw = chat_json(
-        ANALYZE_SYSTEM,
-        json.dumps(context, ensure_ascii=False),
-        Analysis,
-        temperature=0.3,
-        check=body_part_check(notes),
-    )
-    analysis = enforce_confidence(analysis, context["metrics"]["acwr_zone"])
+    analysis, raw, warnings = run_analysis(workout.athlete, list(history), on)
 
     rec = AIRecommendation(
         athlete_id=workout.athlete_id,
         workout_id=workout.id,
         kind=Kind.analysis,
-        recommendation={
-            **analysis.model_dump(),
-            "grounding_warnings": ungrounded_body_parts(analysis, notes),
-        },
+        recommendation={**analysis.model_dump(), "grounding_warnings": warnings},
         raw_response=raw,
         model=settings.llm_name,
     )

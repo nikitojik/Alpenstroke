@@ -1,0 +1,54 @@
+# Evaluation: swiss-ai/apertus-70b-instruct
+
+2026-10-06T20:42:36, 3 repeat(s), endpoint `https://api.publicai.co/v1`
+prompts: parse `7e3e4f30`, analysis `8b462d23`, plan `47f3ef80`
+
+## parse
+
+| metric | value |
+|---|---|
+| runs | 81 |
+| valid_output | 99% |
+| first_try | 89% |
+| median_seconds | 3.7 |
+| course | 100% |
+| duration | 100% |
+| effort | 99% |
+| intervals | 90% |
+| sets | 96% |
+| symptoms | 95% |
+| total | 96% |
+| all_correct | 83% |
+| by_split | dev: 83%, holdout: 93%, test: 72% |
+| by_language | de: 100%, en: 75%, fr: 67%, it: 92%, ru: 86% |
+
+## analysis
+
+| metric | value |
+|---|---|
+| runs | 9 |
+| valid_output | 100% |
+| first_try | 78% |
+| median_seconds | 3.4 |
+| expected_found | 100% |
+| grounded | 100% |
+| nothing_forbidden | 100% |
+| all_correct | 100% |
+| by_profile | cramps: 100%, spike: 100%, steady: 100% |
+
+## plan
+
+| metric | value |
+|---|---|
+| runs | 9 |
+| valid_output | 100% |
+| first_try | 100% |
+| median_seconds | 9.2 |
+| cautions_present | 100% |
+| final_within_target | 100% |
+| goal_stroke_kept | 100% |
+| grounded | 100% |
+| model_within_target | 67% |
+| rules_ok | 100% |
+| all_correct | 100% |
+| by_profile | cramps: 100%, spike: 100%, steady: 100% |

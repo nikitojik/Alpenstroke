@@ -1,15 +1,9 @@
-"""
-Тесты разбора без сети: подменяем chat_json и проверяем то, что делает
-НАШ код после ответа модели (пересчёт дистанции, подсказка бассейна,
-список незаполненных полей, ошибка 502).
-"""
-
 from fastapi.testclient import TestClient
 
 from app.main import app as api
 from app.models import Course, Stroke
 from app.schemas.parse import ParsedWorkout
-from app.schemas.workout import SetIn
+from app.schemas.parse import ExtractedSet as SetIn  # серия от модели, с полем source
 from app.services import parser
 from app.services.llm import LLMError
 
@@ -97,3 +91,35 @@ def test_english_symptoms_pass():
         english_symptoms_check(ParsedWorkout(symptoms=["shoulder pain", "calf cramp"]))
         == []
     )
+
+
+# ---------- формат ответа модели ----------
+
+from app.schemas.parse import WorkoutExtraction  # noqa: E402
+
+
+def test_model_is_not_asked_for_total_distance():
+    # сумму считает код; в схеме для модели этого поля нет
+    assert "total_distance" not in WorkoutExtraction.model_json_schema()["properties"]
+
+
+def test_notes_list_is_accepted():
+    # так модель ответила в eval: "notes": [] ломало разбор дважды подряд
+    assert WorkoutExtraction.model_validate_json('{"notes": []}').notes is None
+    assert (
+        WorkoutExtraction.model_validate_json('{"notes": ["felt", "good"]}').notes
+        == "felt good"
+    )
+
+
+def test_total_is_computed_when_model_sends_none(monkeypatch):
+    fake_chat_json(
+        monkeypatch,
+        WorkoutExtraction(
+            sets=[
+                SetIn(stroke=Stroke.choice, distance=400),
+                SetIn(stroke=Stroke.fly, distance=3000),
+            ]
+        ),
+    )
+    assert parser.parse_workout_text("400 warm up, 3000 fly").total_distance == 3400

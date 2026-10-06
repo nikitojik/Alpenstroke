@@ -161,14 +161,13 @@ def volume_target(
 def _context(
     athlete: Athlete,
     history: list[Workout],
-    latest: AIRecommendation | None,
+    latest_analysis: dict | None,
     today: date,
     start: date,
 ) -> dict:
     recent = sorted(history, key=lambda w: w.workout_date, reverse=True)[:7]
     metrics = summarize(history, today)
     days_to_goal = (athlete.goal_date - today).days if athlete.goal_date else None
-    latest_analysis = latest.recommendation if latest else None
     return {
         "plan_dates": [
             {
@@ -251,40 +250,17 @@ def finalize(
         "enough_history": enough_history,
         "volume_target_m": target,
         "model_total_m": model_total,
-        "model_within_target": model_within,  # попала ли модель сама: метрика для eval
+        "model_within_target": model_within,
         "volume_scaled_by": round(scale, 2) if scale else None,
     }
 
 
-def generate_plan(db: Session, athlete: Athlete) -> AIRecommendation:
-    today = date.today()
+def build_plan(
+    athlete: Athlete, history: list[Workout], latest_analysis: dict | None, today: date
+) -> tuple[dict, str]:
     start = today + timedelta(days=1)
-
-    history = list(
-        db.scalars(
-            select(Workout)
-            .where(
-                Workout.athlete_id == athlete.id,
-                Workout.workout_date <= today,
-                Workout.workout_date > today - timedelta(days=HISTORY_DAYS),
-            )
-            .options(selectinload(Workout.sets))
-        ).all()
-    )
-
-    latest = db.scalars(
-        select(AIRecommendation)
-        .where(
-            AIRecommendation.athlete_id == athlete.id,
-            AIRecommendation.kind == Kind.analysis,
-        )
-        .order_by(AIRecommendation.created_at.desc())
-        .limit(1)
-    ).first()
-
-    context = _context(athlete, history, latest, today, start)
+    context = _context(athlete, history, latest_analysis, today, start)
     notes = grounding_sources(history)
-    latest_analysis = context["latest_analysis"]
     plan, raw = chat_json(
         PLAN_SYSTEM,
         json.dumps(context, ensure_ascii=False),
@@ -301,22 +277,50 @@ def generate_plan(db: Session, athlete: Athlete) -> AIRecommendation:
         target=context["volume_target_m"],
         enough_history=context["metrics"]["acwr_zone"] != "insufficient_history",
     )
-    # После finalize: он мог поднять объём дня до объёма серии
     rule_warnings = (
         hard_days_problems(plan)
         + main_set_problems(plan)
         + cautions_problems(plan, latest_analysis)
+    )
+    return {
+        **final,
+        "grounding_warnings": warnings,
+        "rule_warnings": rule_warnings,
+    }, raw
+
+
+def generate_plan(db: Session, athlete: Athlete) -> AIRecommendation:
+    today = date.today()
+    history = list(
+        db.scalars(
+            select(Workout)
+            .where(
+                Workout.athlete_id == athlete.id,
+                Workout.workout_date <= today,
+                Workout.workout_date > today - timedelta(days=HISTORY_DAYS),
+            )
+            .options(selectinload(Workout.sets))
+        ).all()
+    )
+    latest = db.scalars(
+        select(AIRecommendation)
+        .where(
+            AIRecommendation.athlete_id == athlete.id,
+            AIRecommendation.kind == Kind.analysis,
+        )
+        .order_by(AIRecommendation.created_at.desc())
+        .limit(1)
+    ).first()
+
+    plan, raw = build_plan(
+        athlete, history, latest.recommendation if latest else None, today
     )
 
     rec = AIRecommendation(
         athlete_id=athlete.id,
         workout_id=None,
         kind=Kind.plan,
-        recommendation={
-            **final,
-            "grounding_warnings": warnings,
-            "rule_warnings": rule_warnings,
-        },
+        recommendation=plan,
         raw_response=raw,
         model=settings.llm_name,
     )

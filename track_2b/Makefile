@@ -1,4 +1,4 @@
-.PHONY: run up down logs seed test
+.PHONY: run up down logs seed test eval
 
 run:
 	docker compose up --build
@@ -19,3 +19,6 @@ seed:
 test:
 	docker run --rm -v "$(CURDIR)/src:/src" -w /src python:3.12-slim \
 		sh -c "pip install -q -r requirements.txt && python -m pytest -q"
+eval:
+	docker compose run --rm --build --no-deps --user "$$(id -u):$$(id -g)" \
+		-v "$(CURDIR)/data:/data" app python -m scripts.evaluate $(ARGS)
