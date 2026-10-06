@@ -33,8 +33,38 @@
 </ul>
 {% else %}
 <div class="empty">
-  <p>No athletes yet. Add the demo swimmers with <code>python -m scripts.seed</code>,
-    or create one through <a href="/docs">the API</a>.</p>
+  <p>No athletes yet. Add a swimmer below, or create the three demo swimmers with <code>make seed</code>.</p>
 </div>
 {% endif %}
+
+<details class="add"{% if not rows %} open{% endif %}>
+  <summary class="btn btn--quiet">Add a swimmer</summary>
+  <form class="log-form add__form" hx-post="/swimmers" hx-target="#add-error"
+        hx-disabled-elt="find button[type=submit]">
+    <label for="add-name">Name
+      <input id="add-name" name="name" required maxlength="100" autocomplete="off">
+    </label>
+
+    <fieldset class="strokes">
+      <legend>Main strokes</legend>
+      {% for value, label in stroke_labels.items() %}
+      <label class="strokes__option">
+        <input type="checkbox" name="main_strokes" value="{{ value }}"> {{ label }}
+      </label>
+      {% endfor %}
+    </fieldset>
+
+    <div class="log-form__row">
+      <label>Goal event
+        <input name="goal_event" maxlength="100" placeholder="100 breast">
+      </label>
+      <label>Goal date
+        <input type="date" name="goal_date" min="{{ today.isoformat() }}">
+      </label>
+      <button class="btn" type="submit">Add swimmer</button>
+    </div>
+    <p class="note add__privacy">The name stays in your database. Apertus only sees strokes, the goal and workouts.</p>
+    <div id="add-error"></div>
+  </form>
+</details>
 {% endblock %}

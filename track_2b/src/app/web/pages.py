@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import AIRecommendation, Athlete, Course, Kind, Workout
+from app.schemas.athlete import AthleteCreate
 from app.schemas.workout import WorkoutCreate
 from app.services.analyzer import HISTORY_DAYS, _set_line, analyze_workout
 from app.services.llm import LLMError
@@ -19,7 +20,7 @@ from app.services.parser import parse_workout_text
 from app.services.planner import generate_plan
 from app.services.workouts import save_workout
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # папка app/
+BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 ZONE_LABELS = {
@@ -45,7 +46,21 @@ FIELD_LABELS = {
     "perceived_effort": "Effort",
 }
 
-ROPE_MIN, ROPE_MAX = 0.4, 2.0  # края шкалы ACWR на дорожке
+STROKE_LABELS = {
+    "freestyle": "Freestyle",
+    "fly": "Butterfly",
+    "breaststroke": "Breaststroke",
+    "backstroke": "Backstroke",
+    "medley": "IM",
+}
+ATHLETE_FIELD_LABELS = {
+    "name": "Name",
+    "main_strokes": "Main strokes",
+    "goal_event": "Goal event",
+    "goal_date": "Goal date",
+}
+
+ROPE_MIN, ROPE_MAX = 0.4, 2.0
 
 
 def rope_position(acwr: float) -> float:
@@ -68,19 +83,16 @@ def day_label(iso_date: str) -> str:
     return date.fromisoformat(iso_date).strftime("%a %d %b")
 
 
-# Функции, доступные прямо в шаблонах
 templates.env.globals.update(
     rope_position=rope_position,
     zone_label=lambda zone: ZONE_LABELS.get(zone, zone),
     concern_label=lambda kind: CONCERN_LABELS.get(kind, kind),
     course_labels=COURSE_LABELS,
+    stroke_labels=STROKE_LABELS,
 )
 templates.env.filters.update(km=km, unit=unit, set_line=_set_line, day_label=day_label)
 
-router = APIRouter(include_in_schema=False)  # страниц не будет в /docs
-
-
-# ---------- вспомогательные запросы ----------
+router = APIRouter(include_in_schema=False)
 
 
 def _athlete_or_404(db: Session, athlete_id: int) -> Athlete:
@@ -123,9 +135,6 @@ def _error(request: Request, message: str) -> HTMLResponse:
     return templates.TemplateResponse(request, "_error.html", {"message": message})
 
 
-# ---------- страницы ----------
-
-
 @router.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)):
     today = date.today()
@@ -140,7 +149,9 @@ def home(request: Request, db: Session = Depends(get_db)):
                 ),
             }
         )
-    return templates.TemplateResponse(request, "home.html", {"rows": rows})
+    return templates.TemplateResponse(
+        request, "home.html", {"rows": rows, "today": today}
+    )
 
 
 @router.get("/swimmers/{athlete_id}", response_class=HTMLResponse)
@@ -164,7 +175,45 @@ def swimmer(request: Request, athlete_id: int, db: Session = Depends(get_db)):
     )
 
 
-# ---------- действия (возвращают кусочки HTML для HTMX) ----------
+
+@router.post("/swimmers")
+def create_swimmer(
+    request: Request,
+    name: str = Form(""),
+    main_strokes: list[str] = Form(
+        []
+    ),
+    goal_event: str = Form(""),
+    goal_date: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        payload = AthleteCreate(
+            name=name.strip(),
+            # из формы может прийти что угодно, оставляем только известные стили
+            main_strokes=[s for s in main_strokes if s in STROKE_LABELS],
+            goal_event=goal_event.strip() or None,
+            goal_date=goal_date or None,
+        )
+    except ValidationError as e:
+        fields = sorted(
+            {
+                ATHLETE_FIELD_LABELS.get(str(err["loc"][0]), str(err["loc"][0]))
+                for err in e.errors()
+            }
+        )
+        return _error(request, f"Check these fields: {', '.join(fields)}.")
+
+    if payload.goal_date and payload.goal_date < date.today():
+        return _error(
+            request,
+            "The goal date is in the past. Pick the next meet you are training for.",
+        )
+
+    athlete = Athlete(**payload.model_dump())
+    db.add(athlete)
+    db.commit()
+    return Response(status_code=200, headers={"HX-Redirect": f"/swimmers/{athlete.id}"})
 
 
 @router.post("/swimmers/{athlete_id}/parse", response_class=HTMLResponse)
@@ -191,7 +240,7 @@ def parse(
             "missing_labels": [FIELD_LABELS[f].lower() for f in draft.missing],
             "sets_json": json.dumps([s.model_dump(mode="json") for s in draft.sets]),
             "symptoms_json": json.dumps(draft.symptoms),
-            "notes": text,  # исходный текст сохраняем как заметку: анализ ищет в ней симптомы
+            "notes": text,
             "today": date.today(),
         },
     )
@@ -213,7 +262,7 @@ def save(
 ):
     _athlete_or_404(db, athlete_id)
     sets = json.loads(sets_json or "[]")
-    if sets:  # дистанцию по подходам считает код, а не форма
+    if sets:
         total_distance = str(sum(s["distance"] * s.get("reps", 1) for s in sets))
 
     try:
