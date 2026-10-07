@@ -1,3 +1,5 @@
+name: alpenstroke
+
 services:
   db:
     image: postgres:16
@@ -11,11 +13,11 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U alpenstroke"]
+      test: [ "CMD-SHELL", "pg_isready -U alpenstroke" ]
       interval: 5s
       retries: 10
 
-  app:
+  alpenstroke:
     build: .
     restart: unless-stopped
     environment:

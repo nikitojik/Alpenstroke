@@ -1,0 +1,10 @@
+services:
+  db:
+    ports: !reset []
+  alpenstroke:
+    ports: !reset []
+    networks: [default, edge]
+
+networks:
+  edge:
+    external: true
