@@ -25,4 +25,4 @@ eval:
 		-v "$(CURDIR)/data:/data" alpenstroke python -m scripts.evaluate $(ARGS)
 
 prod:
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+	docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up --build -d
