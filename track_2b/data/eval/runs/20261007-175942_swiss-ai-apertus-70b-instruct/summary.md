@@ -1,0 +1,23 @@
+# Evaluation: swiss-ai/apertus-70b-instruct
+
+2026-10-07T17:59:42, 3 repeat(s), endpoint `https://api.publicai.co/v1`
+prompts: parse `7e3e4f30`, analysis `8b462d23`, plan `47f3ef80`
+
+## parse
+
+| metric | value |
+|---|---|
+| runs | 81 |
+| valid_output | 100% |
+| first_try | 96% |
+| median_seconds | 4.8 |
+| course | 100% |
+| duration | 100% |
+| effort | 96% |
+| intervals | 99% |
+| sets | 100% |
+| symptoms | 100% |
+| total | 100% |
+| all_correct | 95% |
+| by_split | dev: 98%, holdout: 80%, test: 100% |
+| by_language | de: 100%, en: 96%, fr: 100%, it: 100%, ru: 86% |

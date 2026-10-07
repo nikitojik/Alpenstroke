@@ -1,0 +1,73 @@
+name: alpenstroke-airgapped
+
+services:
+  apertus:
+    image: ghcr.io/ggml-org/llama.cpp:server-b11312
+    command:
+      - "-m"
+      - "/models/${GGUF:-apertus-v1.5-8b-text-q4_k_m.gguf}"
+      - "--alias"
+      - "apertus-v1.5-8b"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+      - "--ctx-size"
+      - "12288"
+      - "--parallel"
+      - "1"
+      - "--jinja"
+      - "--cache-ram"
+      - "0"
+    volumes:
+      - ./models:/models:ro
+    networks: [sealed]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 5s
+      retries: 120  # загрузка 5 ГБ в память может занять пару минут
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: alpenstroke
+      POSTGRES_PASSWORD: alpenstroke  # база недоступна снаружи сети sealed
+      POSTGRES_DB: alpenstroke
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [sealed]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alpenstroke"]
+      interval: 5s
+      retries: 10
+
+  alpenstroke:
+    build: .
+    environment:
+      LLM_NAME: apertus-v1.5-8b
+      LLM_BASE_URL: http://apertus:8080/v1
+      LLM_API_KEY: local  # llama.cpp ключ не проверяет, но поле обязательное
+      LLM_TIMEOUT: "900"  # на процессоре план недели пишется несколько минут
+      DATABASE_URL: postgresql+psycopg://alpenstroke:alpenstroke@db:5432/alpenstroke
+    depends_on:
+      db:
+        condition: service_healthy
+      apertus:
+        condition: service_healthy
+    networks: [sealed]
+
+  gate:
+    image: caddy:2
+    command: ["caddy", "reverse-proxy", "--from", ":8000", "--to", "alpenstroke:8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks: [sealed, outside]
+    depends_on: [alpenstroke]
+
+networks:
+  sealed:
+    internal: true
+  outside: {}
+
+volumes:
+  pgdata:
