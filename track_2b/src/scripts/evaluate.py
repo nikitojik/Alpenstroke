@@ -13,8 +13,11 @@ from pathlib import Path
 from app.config import settings
 from app.models import Athlete, Course
 from app.services import llm
+from app.schemas.analysis import Analysis
+from app.schemas.parse import WorkoutExtraction
+from app.schemas.plan import WeeklyPlan
 from app.services.analyzer import ANALYZE_SYSTEM, run_analysis
-from app.services.llm import LLMError
+from app.services.llm import LLMError, _schema_instructions
 from app.services.parser import PARSE_SYSTEM, parse_workout_text
 from app.services.planner import PLAN_SYSTEM, build_plan
 from scripts.seed import PROFILES
@@ -25,15 +28,6 @@ EVAL_DIR = Path(
 
 
 class CallLog:
-    """
-    Подменяет llm._complete: считает вызовы, время и сохраняет каждый сырой ответ.
-    Два вызова на один кейс значат, что первый ответ не прошёл проверку и был повтор.
-
-    Шлюз Public AI кэширует одинаковые запросы: повтор того же кейса приходил за 0.4 с
-    и был копией первого ответа. Поэтому к системному сообщению добавляем метку прогона,
-    и каждый повтор становится новым запросом. В приложении метки нет.
-    """
-
     def __init__(self, run_id: str):
         self.original = llm._complete
         self.run_id = run_id
@@ -44,7 +38,7 @@ class CallLog:
         self.calls, self.seconds, self.responses = 0, 0.0, []
 
     def __call__(self, messages, temperature):
-        messages = [dict(m) for m in messages]  # копия: не трогаем список chat_json
+        messages = [dict(m) for m in messages]
         messages[0]["content"] += f"\n\n[evaluation run {self.run_id}, case {self.tag}]"
         started = time.perf_counter()
         try:
@@ -57,7 +51,6 @@ class CallLog:
 
 
 def run_case(log: CallLog, tag: str, fn):
-    """Запускает fn, ловит LLMError и возвращает (результат или None, ошибка, статистика вызовов)."""
     log.reset(tag)
     try:
         result, error = fn(), None
@@ -69,9 +62,6 @@ def run_case(log: CallLog, tag: str, fn):
         "raw_responses": list(log.responses),
     }
     return result, error, stats
-
-
-# ---------- parse ----------
 
 
 def _set_key(s: dict, timing: bool) -> tuple:
@@ -88,14 +78,11 @@ def score_parse(expected: dict, got: dict) -> dict:
         "course": got["course"] == expected["course"],
         "duration": got["duration_min"] == expected["duration_min"],
         "effort": got["perceived_effort"] == expected["perceived_effort"],
-        # состав серий: стиль, дистанция, повторы (порядок не важен)
         "sets": Counter(_set_key(s, False) for s in got_sets)
         == Counter(_set_key(s, False) for s in exp_sets),
-        # то же плюс режим и отдых
         "intervals": Counter(_set_key(s, True) for s in got_sets)
         == Counter(_set_key(s, True) for s in exp_sets),
         "total": got["total_distance"] == expected["total_distance"],
-        # нужные симптомы найдены и на английском; если симптомов нет, список пустой
         "symptoms": (
             all(re.search(p, symptoms) for p in want) and symptoms.isascii()
             if want
@@ -133,11 +120,7 @@ def eval_parse(log: CallLog, cases: list[dict], repeats: int) -> list[dict]:
     return rows
 
 
-# ---------- analysis и plan на демо-профилях ----------
-
-
 def build_profile(name: str, today: date) -> tuple[Athlete, list]:
-    """Тот же спортсмен, что создаёт seed.py, только в памяти, без базы."""
     for profile_name, strokes, goal, weeks_out, make, seed in PROFILES:
         if profile_name.lower() == name:
             athlete = Athlete(
@@ -162,7 +145,6 @@ def score_analysis(case: dict, analysis: dict, warnings: list[str]) -> dict:
 def score_plan(case: dict, plan: dict, goal_stroke: str) -> dict:
     sets = " ".join((d.get("main_set") or "").lower() for d in plan["days"])
     score = {
-        # попала ли модель в объём сама, до масштабирования кодом
         "model_within_target": plan["model_within_target"],
         "final_within_target": (
             plan["volume_target_m"]["min"]
@@ -171,7 +153,6 @@ def score_plan(case: dict, plan: dict, goal_stroke: str) -> dict:
             if plan["volume_target_m"]
             else None
         ),
-        # правила после повтора: тяжёлые дни, длина серий, предупреждения
         "rules_ok": not plan["rule_warnings"],
         "grounded": not plan["grounding_warnings"],
     }
@@ -191,7 +172,7 @@ def eval_profiles(
     rows = []
     for case in cases:
         athlete, history = build_profile(case["profile"], today)
-        goal_stroke = athlete.goal_event.split()[-1]  # "100 fly" -> "fly"
+        goal_stroke = athlete.goal_event.split()[-1]
         for rep in range(repeats):
             analysis_dict = None
             if "analysis" in tasks:
@@ -230,7 +211,6 @@ def eval_profiles(
                     f"{rows[-1]['score'] if result else 'FAILED'}, {stats['calls']} call(s)"
                 )
             if "plan" in tasks:
-                # как в приложении: план видит последний анализ этого же прогона
                 result, error, stats = run_case(
                     log,
                     f"{case['id']}-plan#{rep}",
@@ -257,16 +237,11 @@ def eval_profiles(
     return rows
 
 
-# ---------- сводка ----------
-
-
 def pct(values: list) -> str:
     values = [v for v in values if v is not None]
     return f"{100 * sum(values) / len(values):.0f}%" if values else "n/a"
 
 
-# Метрики самой модели, а не системы: их показываем, но в «решено целиком» не включаем.
-# model_within_target: попала ли модель в объём сама; итог всё равно доводит код.
 DIAGNOSTIC = {"model_within_target"}
 
 
@@ -292,14 +267,11 @@ def summarize_rows(rows: list[dict]) -> dict:
             "median_seconds": round(
                 statistics.median(r["seconds"] for r in task_rows), 1
             ),
-            # точность по отдельным полям считаем среди валидных ответов
             **{m: pct([r["score"].get(m) for r in ok]) for m in metrics},
-            # а «решено целиком» — среди всех запусков, упавшие тоже в знаменателе
             "all_correct": pct([correct(r) for r in task_rows]),
         }
         groups = {"parse": ("split", "language")}.get(task, ("profile",))
         for key in groups:
-            # dev: случаи, по которым правили промпт; holdout: написаны до правки, под них не подгоняли
             summary[task][f"by_{key}"] = {
                 value: pct([correct(r) for r in task_rows if r[key] == value])
                 for value in sorted({r[key] for r in task_rows})
@@ -351,7 +323,7 @@ def main() -> None:
 
     started = datetime.now()
     log = CallLog(run_id=f"{started:%Y%m%d-%H%M%S}")
-    llm._complete = log  # chat_json зовёт llm._complete, поэтому подмена видна везде
+    llm._complete = log
 
     meta = {
         "model": settings.llm_name,
@@ -359,13 +331,14 @@ def main() -> None:
         "started": started.isoformat(timespec="seconds"),
         "repeats": args.repeats,
         "tasks": sorted(tasks),
-        # короткие отпечатки промптов: по ним видно, какой версией сделан прогон
         "prompts": {
-            name: hashlib.sha256(text.encode()).hexdigest()[:8]
-            for name, text in (
-                ("parse", PARSE_SYSTEM),
-                ("analysis", ANALYZE_SYSTEM),
-                ("plan", PLAN_SYSTEM),
+            name: hashlib.sha256(
+                (text + _schema_instructions(schema)).encode()
+            ).hexdigest()[:8]
+            for name, text, schema in (
+                ("parse", PARSE_SYSTEM, WorkoutExtraction),
+                ("analysis", ANALYZE_SYSTEM, Analysis),
+                ("plan", PLAN_SYSTEM, WeeklyPlan),
             )
         },
     }
